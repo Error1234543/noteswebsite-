@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -15,7 +14,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing required fields.' });
   }
 
-  const prompt = buildPrompt(topic, exam, subject, lang);
+  const { systemPrompt, userPrompt } = buildPrompt(topic, exam, subject, lang);
 
   try {
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -27,8 +26,11 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         max_tokens: 4096,
-        temperature: 0.7,
-        messages: [{ role: 'user', content: prompt }]
+        temperature: 0.65,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: userPrompt   }
+        ]
       })
     });
 
@@ -47,56 +49,108 @@ export default async function handler(req, res) {
 }
 
 function buildPrompt(topic, exam, subject, lang) {
-  const langInstr = {
-    English: 'Respond entirely in clear English.',
-    Gujarati: 'સંપૂર્ણ જવાબ ગુજરાતી ભાષામાં આપો. Technical terms English ma rakhva.',
-    Hindi: 'पूरा जवाब हिंदी में दें। Technical terms English में रखें।',
-    Hinglish: 'Hinglish mein jawab do (Hindi + English mix). Easy aur conversational rakho.',
-  }[lang] || 'Respond in English.';
 
+  // ── SYSTEM PROMPT (language locked here) ──────────────────────────
+  const systemPrompts = {
+    English: `You are an expert ${subject} teacher specializing in ${exam} exam preparation.
+You MUST write your ENTIRE response in English only.
+Use clear, structured English throughout — headings, explanations, bullet points, everything.`,
+
+    Gujarati: `તમે ${subject} વિષયના નિષ્ણાત શિક્ષક છો જે ${exam} પરીક્ષાની તૈયારી કરાવો છો.
+તમારે સમગ્ર જવાબ શુદ્ધ ગુજરાતી ભાષામાં લખવાનો છે.
+બધા headings, explanations, bullet points — બધું જ ગુજરાતીમાં હોવું જોઈએ.
+ફક્ત scientific/technical terms (જેમ કે: DNA, ATP, Mitosis, Newton, etc.) અંગ્રેજીમાં રાખો, બાકી બધું ગુજરાતીમાં.
+ગુજરાતી સ્ક્રિપ્ટ (દેવનાગરી નહીં) વાપરો. ઉદાહરણ: "કોષ" not "cell" for common words.`,
+
+    Hindi: `आप ${subject} विषय के विशेषज्ञ शिक्षक हैं जो ${exam} परीक्षा की तैयारी कराते हैं।
+आपको पूरा जवाब शुद्ध हिंदी में लिखना है।
+सभी headings, explanations, bullet points — सब कुछ हिंदी में होना चाहिए।
+केवल scientific/technical terms (जैसे: DNA, ATP, Mitosis) अंग्रेजी में रखें, बाकी सब हिंदी में।`,
+
+    Hinglish: `You are an expert ${subject} teacher preparing students for ${exam}.
+Write in a friendly Hinglish style — mix Hindi and English naturally, like a coaching teacher talks.
+Example: "Cell cycle mein 4 phases hote hain — yeh samajhna bahut important hai NEET ke liye."
+Keep it conversational, easy to understand, and exam-focused.`,
+  };
+
+  const systemPrompt = systemPrompts[lang] || systemPrompts.English;
+
+  // ── EXAM CONTEXT ──────────────────────────────────────────────────
   const examContext = {
-    'NEET': 'NEET UG medical entrance exam level. Focus on NCERT-based deep concepts, diagram descriptions, important definitions, previous year question patterns.',
-    'JEE': 'JEE Main & Advanced level. Include derivations, problem-solving approaches, key formulas.',
-    'GUJCET': 'GUJCET exam level, Gujarat state syllabus. Follow GSEB curriculum.',
-    'Board (Gujarat)': 'Gujarat Board (GSEB) Class 11-12 level. Simple, clear explanation aligned with Gujarat textbook.',
-    'Board (CBSE)': 'CBSE Board Class 11-12 level. NCERT-aligned explanation.',
-    'UPSC': 'UPSC Civil Services exam level. Include current relevance, static GK, previous year question types.',
-    'GPSC': 'GPSC Gujarat Public Service Commission level. Gujarat-specific context where relevant.',
-    'SSC': 'SSC CGL/CHSL level. Focus on basics, quick revision points.',
-    'General Knowledge': 'General knowledge level. Broad overview with interesting facts.',
+    'NEET':            'NEET UG level — NCERT-based, focus on definitions, diagrams, processes, MCQ-type important points.',
+    'JEE':             'JEE Main & Advanced level — derivations, problem-solving, key formulas, numerical concepts.',
+    'GUJCET':          'GUJCET level — Gujarat state syllabus (GSEB), standard 11-12 curriculum.',
+    'Board (Gujarat)': 'Gujarat Board (GSEB) Class 11-12 — simple clear explanation per Gujarat textbook.',
+    'Board (CBSE)':    'CBSE Board Class 11-12 — NCERT-aligned, board exam pattern.',
+    'UPSC':            'UPSC Civil Services — static GK, current relevance, previous year question patterns.',
+    'GPSC':            'GPSC Gujarat PSC level — Gujarat-specific context, state-level syllabus.',
+    'SSC':             'SSC CGL/CHSL level — basics, quick points, general awareness focus.',
+    'General Knowledge':'General knowledge — broad overview, interesting facts, easy language.',
   }[exam] || 'Standard competitive exam level.';
 
-  return `You are an expert ${subject} teacher and exam coach. A student is preparing for ${exam}.
+  // ── SECTION HEADERS per language ─────────────────────────────────
+  const sections = {
+    English: {
+      deep:  '## 📚 DEEP NOTES',
+      imp:   '## ⭐ IMPORTANT POINTS (Exam ke liye must-know)',
+      short: '## 🚀 SHORT NOTES (Quick Revision)',
+      tips:  `## 🎯 EXAM TIPS (${exam} Specific)`,
+    },
+    Gujarati: {
+      deep:  '## 📚 DEEP NOTES',
+      imp:   '## ⭐ IMPORTANT POINTS (પરીક્ષા માટે જરૂરી)',
+      short: '## 🚀 SHORT NOTES (ઝડપી રિવિઝન)',
+      tips:  `## 🎯 EXAM TIPS (${exam} માટે)`,
+    },
+    Hindi: {
+      deep:  '## 📚 DEEP NOTES',
+      imp:   '## ⭐ IMPORTANT POINTS (परीक्षा के लिए जरूरी)',
+      short: '## 🚀 SHORT NOTES (Quick Revision)',
+      tips:  `## 🎯 EXAM TIPS (${exam} के लिए)`,
+    },
+    Hinglish: {
+      deep:  '## 📚 DEEP NOTES',
+      imp:   '## ⭐ IMPORTANT POINTS (Exam ke liye must-know)',
+      short: '## 🚀 SHORT NOTES (Last minute revision)',
+      tips:  `## 🎯 EXAM TIPS (${exam} ke liye)`,
+    },
+  }[lang] || {
+    deep:  '## 📚 DEEP NOTES',
+    imp:   '## ⭐ IMPORTANT POINTS',
+    short: '## 🚀 SHORT NOTES',
+    tips:  '## 🎯 EXAM TIPS',
+  };
 
-${langInstr}
-
+  // ── USER PROMPT ───────────────────────────────────────────────────
+  const userPrompt = `EXAM: ${exam}
+SUBJECT: ${subject}
+TOPIC: "${topic}"
 EXAM CONTEXT: ${examContext}
 
-TOPIC: "${topic}"
+Generate a COMPLETE study resource with these EXACT 4 sections in order:
 
-Generate a COMPREHENSIVE study resource with these EXACT sections:
-
-## 📚 DEEP NOTES
-Provide thorough, exam-focused explanation of the topic:
-- Core concepts with clear definitions
-- Mechanisms/processes explained step by step
+${sections.deep}
+- Topic ki complete explanation with core concepts and definitions
+- Step-by-step mechanisms or processes
 - Important diagrams described in text
-- Key formulas/equations (if applicable)
+- Key formulas or equations (if applicable)
 - Exceptions and special cases
-- Comparison tables (if applicable)
-- Examples and applications
+- Comparison tables where helpful
+- Real examples and applications
 
-## ⭐ IMPORTANT POINTS (Exam ke liye must-know)
-Bullet list of 12-18 most important facts/points that are frequently asked in ${exam}. Each point should be concise and exam-ready.
+${sections.imp}
+Write 12-18 bullet points of the most important exam-ready facts for ${exam}. Each point must be concise and directly useful for MCQs or short answers.
 
-## 🚀 SHORT NOTES (Quick Revision)
-Ultra-condensed version — 8-12 one-liner or two-liner points for last-minute revision before exam.
+${sections.short}
+Write 8-12 ultra-short one-liner or two-liner points for last-minute revision only.
 
-## 🎯 EXAM TIPS (${exam} Specific)
-- 3-5 points on how this topic is tested in ${exam}
-- Common mistakes to avoid
-- Memory tricks or mnemonics if helpful
+${sections.tips}
+- How is this topic tested in ${exam}?
+- Common mistakes students make
+- Memory tricks or mnemonics
 - Expected question types
 
-Format your response with clear headings using ## and ###. Use **bold** for key terms. Use tables where comparisons are needed.`;
+IMPORTANT: Use ## and ### for headings. Use **bold** for key terms. Use tables for comparisons.`;
+
+  return { systemPrompt, userPrompt };
 }
